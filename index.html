@@ -168,6 +168,7 @@
   .lock input{display:block;width:100%;background:var(--panel2);border:1px solid var(--hair);border-radius:10px;color:var(--ink);padding:12px;font-size:16px;text-align:center;margin-bottom:10px}
   .lock button{width:100%;border:0;border-radius:10px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;background:var(--amber);color:#1a1300}
   .lock .err{font-size:11.5px;color:var(--warn);margin-top:10px;min-height:16px}
+.wtag{display:inline-block;font-size:10px;line-height:1.5;border:1px solid #e6c34a;color:#e6c34a;border-radius:4px;padding:0 5px;margin-left:6px;vertical-align:2px;letter-spacing:.04em}
 </style>
 </head>
 <body>
@@ -232,11 +233,13 @@
   </div>
 
   <div class="foot">
-    取込データ最終更新 <b>2026/7/20</b> · 手入力 <b id="footTx">0</b>件<br>
+    取込データ最終更新 <b>2026/7/20</b><span id="footAdd"></span> · 手入力 <b id="footTx">0</b>件<br>
     データはこの端末のブラウザに保存されます<br>
+    <span class="lnk" id="addBtn">追加分を読み込み</span><span id="addClrWrap" style="display:none"> · <span class="lnk" id="addClr">追加分を消す</span></span><br>
     <span class="lnk" id="codeCopy">引き継ぎコードをコピー</span> · <span class="lnk" id="codePaste">引き継ぎコードを読み込み</span><br>
     <span class="lnk" id="expBtn">バックアップ書き出し</span> · <span class="lnk" id="impBtn">バックアップ読み込み</span>
     <input type="file" id="impFile" accept=".json,application/json" style="display:none">
+    <input type="file" id="addFile" accept=".json,application/json" style="display:none">
   </div>
 </div>
 
@@ -264,8 +267,9 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pad2 = n => String(n).padStart(2,'0');
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
-const LS_TX = 'kakei:tx:v1', LS_PREFS = 'kakei:prefs:v1';
+const LS_TX = 'kakei:tx:v1', LS_PREFS = 'kakei:prefs:v1', LS_ADD = 'kakei:add:v1';
 let TX = [];
+let ADD = { months: {} };   // 月単位の追加取込（同じ月はこちらで置き換え）
 let prefs = { budget: null, lastYm: null };
 let MONTHS = [], SHOP = {}, YEARS = [];
 let idx = 0;
@@ -274,7 +278,10 @@ let ymode = false;
 function loadAll(){
   try{ const t = JSON.parse(localStorage.getItem(LS_TX)||'[]'); if(Array.isArray(t)) TX = t; }catch(e){}
   try{ const p = JSON.parse(localStorage.getItem(LS_PREFS)||'null'); if(p && typeof p==='object') prefs = Object.assign(prefs, p); }catch(e){}
+  try{ const a = JSON.parse(localStorage.getItem(LS_ADD)||'null'); if(a && a.months) ADD = a; }catch(e){}
 }
+function saveAdd(){ try{ localStorage.setItem(LS_ADD, JSON.stringify(ADD)); }catch(e){ alert('保存できませんでした。ブラウザのストレージ設定を確認してください。'); } }
+const addCount = () => Object.keys(ADD.months||{}).length;
 function saveTx(){ try{ localStorage.setItem(LS_TX, JSON.stringify(TX)); }catch(e){ alert('保存できませんでした。ブラウザのストレージ設定を確認してください。'); } }
 function savePrefs(){ try{ localStorage.setItem(LS_PREFS, JSON.stringify(prefs)); }catch(e){} }
 
@@ -284,6 +291,14 @@ function buildData(){
   SEED.months.forEach(m=>{ const g={}; (m.g||[]).forEach(([k,a,c])=>g[k]=[a,c]); map[m.ym]={ym:m.ym,y:m.y,m:m.m,total:m.total,cnt:m.cnt,g}; });
   SHOP = {};
   for(const ym in SEED.shop){ SHOP[ym]={}; for(const g in SEED.shop[ym]) SHOP[ym][g]=SEED.shop[ym][g].map(r=>r.slice()); }
+  // 追加取込ぶんで同じ月をまるごと置き換える（ほかの月はそのまま）
+  for(const ym in (ADD.months||{})){
+    const a=ADD.months[ym], g={};
+    (a.g||[]).forEach(([k,amt,c])=>g[k]=[amt,c]);
+    map[ym]={ ym, y:+ym.slice(0,4), m:+ym.slice(5,7), total:a.total, cnt:a.cnt, g, note:a.note||'' };
+    SHOP[ym]={};
+    for(const gg in (a.shop||{})) SHOP[ym][gg]=a.shop[gg].map(r=>r.slice());
+  }
   TX.forEach(t=>{
     const ym=t.date.slice(0,7);
     if(!map[ym]) map[ym]={ym,y:+ym.slice(0,4),m:+ym.slice(5,7),total:0,cnt:0,g:{}};
@@ -299,7 +314,7 @@ function buildData(){
   });
   const cy=todayStr().slice(0,7);
   if(!map[cy]) map[cy]={ym:cy,y:+cy.slice(0,4),m:+cy.slice(5,7),total:0,cnt:0,g:{}};
-  MONTHS = Object.values(map).map(M=>({ym:M.ym,y:M.y,m:M.m,total:M.total,cnt:M.cnt,cur:M.ym===cy,g:Object.keys(M.g).map(k=>[k,M.g[k][0],M.g[k][1]]).sort((a,b)=>b[1]-a[1])}));
+  MONTHS = Object.values(map).map(M=>({ym:M.ym,y:M.y,m:M.m,total:M.total,cnt:M.cnt,cur:M.ym===cy,note:M.note||'',g:Object.keys(M.g).map(k=>[k,M.g[k][0],M.g[k][1]]).sort((a,b)=>b[1]-a[1])}));
   MONTHS.sort((a,b)=>b.ym.localeCompare(a.ym));
   YEARS = [...new Set(MONTHS.map(m=>m.y))].sort((a,b)=>b-a);
 }
@@ -346,7 +361,7 @@ function renderHero(){
     $('budget').innerHTML='';
   } else {
     const m=MONTHS[idx], prev=MONTHS[idx+1];
-    $('heroLab').textContent = m.m+'月の支出';
+    $('heroLab').innerHTML = esc(m.m+'月の支出') + (m.note ? ' <span class="wtag">'+esc(m.note)+'</span>' : '');
     $('heroAmt').textContent = yen(m.total);
     let pill='', sub='';
     if(m.cur){ pill='<span class="pill live"><span class="d"></span>進行中</span>';
@@ -492,6 +507,7 @@ function renderTx(){
 function render(){
   renderYearSel(); renderMonthChips(); renderHero(); renderDonut(); renderSortbar(); renderCats(); renderTx(); renderTrend();
   $('footTx').textContent=TX.length;
+  { const n=addCount(); $('footAdd').innerHTML = n?' · 追加取込 <b>'+n+'</b>ヶ月':''; $('addClrWrap').style.display = n?'inline':'none'; }
   prefs.lastYm=MONTHS[idx].ym; prefs.ymode=ymode; savePrefs();
 }
 
@@ -523,7 +539,7 @@ $('fSave').onclick=()=>{
 };
 
 $('expBtn').onclick=()=>{
-  const blob=new Blob([JSON.stringify({app:'kakei',ver:1,exported:todayStr(),tx:TX,prefs:prefs},null,1)],{type:'application/json'});
+  const blob=new Blob([JSON.stringify({app:'kakei',ver:2,exported:todayStr(),tx:TX,prefs:prefs,add:ADD},null,1)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='kakei-backup-'+todayStr()+'.json';
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
 };
@@ -536,15 +552,16 @@ $('impFile').onchange=e=>{
       const d=JSON.parse(r.result);
       if(!Array.isArray(d.tx)) throw new Error('bad format');
       TX=d.tx; if(d.prefs&&typeof d.prefs==='object') prefs=Object.assign(prefs,d.prefs);
-      saveTx(); savePrefs(); buildData(); idx=0; ymode=false; render();
-      alert('読み込みました（手入力 '+TX.length+'件）');
+      if(d.add&&d.add.months) ADD=d.add;
+      saveTx(); savePrefs(); saveAdd(); buildData(); idx=0; ymode=false; render();
+      alert('読み込みました（手入力 '+TX.length+'件 / 追加取込 '+addCount()+'ヶ月）');
     }catch(err){ alert('読み込みに失敗しました。バックアップファイルを確認してください。'); }
   };
   r.readAsText(f); e.target.value='';
 };
 
 $('codeCopy').onclick=async()=>{
-  const code='KAKEI1.'+btoa(unescape(encodeURIComponent(JSON.stringify({tx:TX,prefs:prefs}))));
+  const code='KAKEI1.'+btoa(unescape(encodeURIComponent(JSON.stringify({tx:TX,prefs:prefs,add:ADD}))));
   try{ await navigator.clipboard.writeText(code); alert('引き継ぎコードをコピーしました。\nLINEやメールなどで新しい端末に送り、「引き継ぎコードを読み込み」に貼り付けてください。'); }
   catch(e){ prompt('このコードを全選択してコピーしてください', code); }
 };
@@ -555,9 +572,60 @@ $('codePaste').onclick=()=>{
     const d=JSON.parse(decodeURIComponent(escape(atob(s.trim().replace(/^KAKEI1\./,'')))));
     if(!Array.isArray(d.tx)) throw new Error('bad format');
     TX=d.tx; if(d.prefs&&typeof d.prefs==='object') prefs=Object.assign(prefs,d.prefs);
-    saveTx(); savePrefs(); buildData(); idx=0; ymode=false; render();
-    alert('読み込みました（手入力 '+TX.length+'件）');
+    if(d.add&&d.add.months) ADD=d.add;
+    saveTx(); savePrefs(); saveAdd(); buildData(); idx=0; ymode=false; render();
+    alert('読み込みました（手入力 '+TX.length+'件 / 追加取込 '+addCount()+'ヶ月）');
   }catch(e){ alert('コードを読み込めませんでした。コード全体をコピーできているか確認してください。'); }
+};
+
+// ---- 追加分の取り込み（月単位で上書き・ほかの月は残る） ----
+function normalizeAdd(j){
+  const out={};
+  const put=(ym,v)=>{
+    if(!/^\d{4}-\d{2}$/.test(ym)) return;
+    const src=v.genres||v.g||{}, g=[], shop={};
+    let total=0, cnt=0;
+    for(const name in src){
+      const d=src[name];
+      const amt=(d.amt!=null?d.amt:(d.total!=null?d.total:0))|0;
+      const c=(d.cnt!=null?d.cnt:0)|0;
+      g.push([name,amt,c]); total+=amt; cnt+=c;
+      const ss=d.shops||{}, rows=[];
+      for(const sn in ss){ const sv=ss[sn];
+        rows.push([sn, Array.isArray(sv)?sv[0]:sv.amt, (Array.isArray(sv)?sv[1]:sv.cnt)||0]); }
+      rows.sort((a,b)=>b[1]-a[1]);
+      if(rows.length) shop[name]=rows;
+    }
+    g.sort((a,b)=>b[1]-a[1]);
+    out[ym]={ total:(v.total!=null?v.total:total), cnt:(v.cnt!=null?v.cnt:cnt), g, shop, note:v.note||'' };
+  };
+  if(j.month && (j.genres||j.g)) put(j.month, j);
+  const src=j.months||j;
+  for(const k in src){ const v=src[k]; if(v && typeof v==='object' && (v.genres||v.g)) put(k,v); }
+  return out;
+}
+$('addBtn').onclick=()=>$('addFile').click();
+$('addFile').onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const got=normalizeAdd(JSON.parse(r.result));
+      const ks=Object.keys(got).sort();
+      if(!ks.length) throw new Error('no month');
+      if(!ADD.months) ADD.months={};
+      ks.forEach(k=>ADD.months[k]=got[k]);
+      saveAdd(); buildData();
+      const i=mIndexByYm(ks[ks.length-1]); if(i>=0){ idx=i; ymode=false; } else { idx=0; }
+      render();
+      alert(ks.join('、')+' を取り込みました。');
+    }catch(err){ alert('読み込みに失敗しました。ファイルの形式を確認してください。'); }
+  };
+  r.readAsText(f); e.target.value='';
+};
+$('addClr').onclick=()=>{
+  if(!confirm('追加で取り込んだぶんを全部消して、元の取込データに戻します。よろしいですか。')) return;
+  ADD={months:{}}; saveAdd(); buildData(); idx=0; ymode=false; render();
 };
 
 $('py').onclick=()=>stepYear(-1);
