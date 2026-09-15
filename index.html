@@ -237,7 +237,8 @@
     データはこの端末のブラウザに保存されます<br>
     <span class="lnk" id="addBtn">追加分を読み込み</span><span id="addClrWrap" style="display:none"> · <span class="lnk" id="addClr">追加分を消す</span></span><br>
     <span class="lnk" id="codeCopy">引き継ぎコードをコピー</span> · <span class="lnk" id="codePaste">引き継ぎコードを読み込み</span><br>
-    <span class="lnk" id="expBtn">バックアップ書き出し</span> · <span class="lnk" id="impBtn">バックアップ読み込み</span>
+    <span class="lnk" id="expBtn">バックアップ書き出し</span> · <span class="lnk" id="impBtn">バックアップ読み込み</span><br>
+    自動バックアップ <b id="abkStat">未設定</b> · <span class="lnk" id="abkSet">設定コードを入力</span>
     <input type="file" id="impFile" accept=".json,application/json" style="display:none">
     <input type="file" id="addFile" accept=".json,application/json" style="display:none">
   </div>
@@ -280,9 +281,9 @@ function loadAll(){
   try{ const p = JSON.parse(localStorage.getItem(LS_PREFS)||'null'); if(p && typeof p==='object') prefs = Object.assign(prefs, p); }catch(e){}
   try{ const a = JSON.parse(localStorage.getItem(LS_ADD)||'null'); if(a && a.months) ADD = a; }catch(e){}
 }
-function saveAdd(){ try{ localStorage.setItem(LS_ADD, JSON.stringify(ADD)); }catch(e){ alert('保存できませんでした。ブラウザのストレージ設定を確認してください。'); } }
+function saveAdd(){ try{ localStorage.setItem(LS_ADD, JSON.stringify(ADD)); }catch(e){ alert('保存できませんでした。ブラウザのストレージ設定を確認してください。'); } autoBackupSoon(); }
 const addCount = () => Object.keys(ADD.months||{}).length;
-function saveTx(){ try{ localStorage.setItem(LS_TX, JSON.stringify(TX)); }catch(e){ alert('保存できませんでした。ブラウザのストレージ設定を確認してください。'); } }
+function saveTx(){ try{ localStorage.setItem(LS_TX, JSON.stringify(TX)); }catch(e){ alert('保存できませんでした。ブラウザのストレージ設定を確認してください。'); } autoBackupSoon(); }
 function savePrefs(){ try{ localStorage.setItem(LS_PREFS, JSON.stringify(prefs)); }catch(e){} }
 
 // 取込済みデータ(SEED)と手入力(TX)をマージして表示用のMONTHS/SHOPを作る
@@ -652,6 +653,49 @@ async function tryCachedKey(){
   try{ const key=await crypto.subtle.importKey('raw',b64d(k),'AES-GCM',false,['decrypt']); SEED=await decryptSeed(key); return true; }
   catch(e){ localStorage.removeItem(KEY_CACHE); return false; }
 }
+
+/* ---------- 自動バックアップ（2026-09-16 追加） ----------
+   データを保存するたびに、本人の Google ドライブへ JSON を送る。何も操作しなくてよい。
+   送り先と合言葉はこの端末の localStorage にだけ持つ。
+   このリポジトリは公開なので、コードにもバックアップの中身にも送り先を書かない。 */
+const LS_ABK='kakei:autobk:v1';
+function abkCfg(){ try{ const c=JSON.parse(localStorage.getItem(LS_ABK)||'null'); return (c&&c.u&&c.t)?c:null; }catch(e){ return null; } }
+function abkSave(c){ try{ localStorage.setItem(LS_ABK, JSON.stringify(c)); }catch(e){} }
+function abkApplyCode(s){
+  try{
+    const b=s.trim().replace(/^.*#autobk=/,'').replace(/-/g,'+').replace(/_/g,'/');
+    const d=JSON.parse(decodeURIComponent(escape(atob(b))));
+    if(!/^https:\/\/script\.google\.com\//.test(d.u)||!d.t) throw new Error('bad');
+    abkSave({u:d.u,t:d.t,lastAt:0,lastCount:0}); return true;
+  }catch(e){ return false; }
+}
+function abkShow(){
+  const el=document.getElementById('abkStat'); if(!el) return;
+  const c=abkCfg();
+  if(!c){ el.textContent='未設定'; return; }
+  if(c.hold){ el.textContent='件数が大きく減ったため停止中'; return; }
+  if(!c.lastAt){ el.textContent='設定済み（まだ送っていない）'; return; }
+  const d=new Date(c.lastAt); el.textContent=(d.getMonth()+1)+'/'+d.getDate()+' '+pad2(d.getHours())+':'+pad2(d.getMinutes())+' 送信';
+}
+let abkT=null;
+function autoBackupSoon(){ clearTimeout(abkT); abkT=setTimeout(sendAutoBackup, 4000); }
+async function sendAutoBackup(){
+  const c=abkCfg(); if(!c) return;
+  if(!TX.length) return;
+  if(c.lastCount>=5 && TX.length<c.lastCount/2){ c.hold=true; abkSave(c); abkShow(); return; }
+  const data={app:'kakei',ver:2,exported:todayStr(),tx:TX,prefs:prefs,add:ADD};
+  try{
+    await fetch(c.u,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},
+                     body:JSON.stringify({token:c.t,data:data})});
+    c.lastAt=Date.now(); c.lastCount=TX.length; delete c.hold; abkSave(c); abkShow();
+  }catch(e){}
+}
+if(location.hash.indexOf('#autobk=')===0){
+  const ok=abkApplyCode(location.hash);
+  history.replaceState(null,'',location.pathname+location.search);
+  setTimeout(()=>alert(ok?'自動バックアップを設定しました':'設定コードが正しくありません'),300);
+}
+
 function startApp(){
   COLORS=SEED.colors;
   loadAll(); buildData();
@@ -659,6 +703,11 @@ function startApp(){
   if(prefs.ymode) ymode=true;
   render();
   $('lock').style.display='none';
+  abkShow();
+  const c=abkCfg(); if(c && Date.now()-(c.lastAt||0) > 20*3600*1000) setTimeout(sendAutoBackup, 2000);
+  const s=document.getElementById('abkSet');
+  if(s) s.onclick=()=>{ const v=prompt('自動バックアップの設定コードを貼り付けてください'); if(!v) return;
+    if(abkApplyCode(v)){ abkShow(); sendAutoBackup(); alert('自動バックアップを設定しました'); } else alert('設定コードが正しくありません'); };
 }
 function showLock(){
   $('lock').style.display='flex';
