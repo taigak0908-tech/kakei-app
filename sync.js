@@ -8,6 +8,28 @@ function _has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
 function _ts(row) { return (row && typeof row.ts === 'number') ? row.ts : 0; }
 function _num(v) { return typeof v === 'number' ? v : 0; }
 
+// キーの並びに左右されない比較用の文字列（オブジェクトのキーを再帰的に並べ替える。配列の順は保つ）
+function _stable(x) {
+  if (x === undefined) return undefined;
+  if (x === null || typeof x !== 'object') return JSON.stringify(x);
+  var i, parts = [];
+  if (Array.isArray(x)) {
+    for (i = 0; i < x.length; i++) { var e = _stable(x[i]); parts.push(e === undefined ? 'null' : e); }
+    return '[' + parts.join(',') + ']';
+  }
+  var keys = Object.keys(x).sort();
+  for (i = 0; i < keys.length; i++) {
+    var v = _stable(x[keys[i]]);
+    if (v !== undefined) parts.push(JSON.stringify(keys[i]) + ':' + v);
+  }
+  return '{' + parts.join(',') + '}';
+}
+
+// 変更判定に使う cal 行の射影（applyCalRows が作る項目だけ）
+function _calKey(r) {
+  return { id: r.id, date: r.date, amount: r.amount, genre: r.genre, shop: r.shop, cash: r.cash, who: r.who };
+}
+
 // 状態の欠けた部分を補う（入力は書き換えず、コピーを返す）
 function _norm(s) {
   s = s || {};
@@ -85,8 +107,8 @@ function mergeState(local, remote) {
   }
 
   var out = { tx: tx, del: del, add: { months: months, at: at } };
-  var before = JSON.stringify({ tx: L.tx, del: L.del, add: L.add });
-  out.changed = JSON.stringify({ tx: tx, del: del, add: out.add }) !== before;
+  var before = _stable({ tx: L.tx, del: L.del, add: L.add });
+  out.changed = _stable({ tx: tx, del: del, add: out.add }) !== before;
   return out;
 }
 
@@ -100,8 +122,12 @@ function applyCalRows(tx, calRows) {
     else rest.push(_clone(tx[i]));
   }
   var newCal = [];
+  var oldKey = [];
+  var newKey = [];
+  for (i = 0; i < oldCal.length; i++) oldKey.push(_calKey(oldCal[i]));
   for (i = 0; i < (calRows || []).length; i++) {
     var r = calRows[i];
+    newKey.push(_calKey({ id: 'cal:' + r.id, date: r.date, amount: r.amount, genre: r.genre, shop: r.shop, cash: r.cash, who: r.who }));
     newCal.push({
       id: 'cal:' + r.id, date: r.date, amount: r.amount, genre: r.genre, shop: r.shop,
       cash: r.cash, who: r.who, src: 'cal', calId: r.id
@@ -109,7 +135,7 @@ function applyCalRows(tx, calRows) {
   }
   return {
     tx: rest.concat(newCal),
-    changed: JSON.stringify(newCal) !== JSON.stringify(oldCal)
+    changed: _stable(newKey) !== _stable(oldKey)
   };
 }
 

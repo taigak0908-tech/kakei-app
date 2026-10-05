@@ -131,6 +131,29 @@ t('同じもの同士なら changed=false', () => {
   assert.strictEqual(r.changed, false);
 });
 
+t('months と at のキー順が逆でも、同じもの同士なら changed=false', () => {
+  const s = { tx: [{ id: 'a', ts: 1, amount: 1, date: 'd' }], del: { q: 1, p: 2 },
+    add: { months: { '2026-09': { x: 1, y: 2 }, '2026-08': { x: 3 } }, at: { '2026-08': 4, '2026-09': 5 } } };
+  const remote = clone(s);
+  remote.tx[0] = { date: 'd', amount: 1, ts: 1, id: 'a' }; // 行の項目の並びも違う
+  remote.del = { p: 2, q: 1 };
+  remote.add.months['2026-09'] = { y: 2, x: 1 };
+  assert.strictEqual(S.mergeState(s, clone(s)).changed, false);
+  assert.strictEqual(S.mergeState(s, remote).changed, false);
+});
+
+t('applyCalRows: 保存済みの cal 行に余計な項目があっても、中身が同じなら changed=false', () => {
+  const cal = [{ id: '2', date: '2026-10-01', amount: 500, genre: 'g', shop: 's', cash: false, who: 'w' }];
+  const stored = [{ id: 'x' }, { who: 'w', cash: false, shop: 's', genre: 'g', amount: 500, date: '2026-10-01',
+    id: 'cal:2', src: 'cal', calId: '2', extra: 'zzz' }];
+  const r = S.applyCalRows(stored, cal);
+  assert.strictEqual(r.changed, false);
+  assert.deepStrictEqual(r.tx.map(x => x.id), ['x', 'cal:2']);
+  // 中身が違えば changed=true
+  cal[0].amount = 501;
+  assert.strictEqual(S.applyCalRows(stored, cal).changed, true);
+});
+
 t('cal: の行は塊に乗せず、applyCalRows で丸ごと入れ替わる', () => {
   const r = S.applyCalRows([{ id: 'x' }, { id: 'cal:1', src: 'cal' }],
     [{ id: '2', date: '2026-10-01', amount: 500, genre: '外食・カフェ', shop: '店', cash: false, who: 'まなみ' }]);
