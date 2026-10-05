@@ -156,9 +156,9 @@ t('applyCalRows: 保存済みの cal 行に余計な項目があっても、中�
 
 t('cal: の行は塊に乗せず、applyCalRows で丸ごと入れ替わる', () => {
   const r = S.applyCalRows([{ id: 'x' }, { id: 'cal:1', src: 'cal' }],
-    [{ id: '2', date: '2026-10-01', amount: 500, genre: '外食・カフェ', shop: '店', cash: false, who: 'まなみ' }]);
+    [{ id: '2', date: '2026-10-01', amount: 500, genre: '外食・カフェ', shop: '店', cash: false, who: 'B' }]);
   assert.deepStrictEqual(r.tx.map(x => x.id), ['x', 'cal:2']);
-  assert.strictEqual(r.tx[1].who, 'まなみ');
+  assert.strictEqual(r.tx[1].who, 'B');
   assert.strictEqual(r.tx[1].src, 'cal');
   assert.strictEqual(r.tx[1].calId, '2');
   assert.strictEqual(r.tx[1].cash, false);
@@ -199,27 +199,50 @@ t('applyCalRows は入力を書き換えない', () => {
 });
 
 t('diffPushed は未送信だけ出し、cal: は出さない', () => {
-  const r = S.diffPushed([{ id: 'a' }, { id: 'b' }, { id: 'cal:9', src: 'cal' }], { c: 1, z: 1 }, { a: true, c: true });
+  const r = S.diffPushed([{ id: 'a', hand: 1 }, { id: 'b', hand: 1 }, { id: 'cal:9', src: 'cal', hand: 1 }], { c: 1, z: 1 }, { a: true, c: true });
   assert.deepStrictEqual(r.add.map(x => x.id), ['b']);
   assert.deepStrictEqual(r.del, ['c']);
   assert.deepStrictEqual(r.pushed, { a: true, b: true });
 });
 
 t('diffPushed は入力を書き換えない', () => {
-  const tx = [{ id: 'a' }, { id: 'b' }];
+  const tx = [{ id: 'a', hand: 1 }, { id: 'b', hand: 1 }];
   const del = { c: 1 };
   const pushed = { a: true, c: true };
   S.diffPushed(tx, del, pushed);
-  assert.deepStrictEqual(tx, [{ id: 'a' }, { id: 'b' }]);
+  assert.deepStrictEqual(tx, [{ id: 'a', hand: 1 }, { id: 'b', hand: 1 }]);
   assert.deepStrictEqual(del, { c: 1 });
   assert.deepStrictEqual(pushed, { a: true, c: true });
 });
 
 t('diffPushed: pushed が空でも動く', () => {
-  const r = S.diffPushed([{ id: 'a' }], {}, {});
+  const r = S.diffPushed([{ id: 'a', hand: 1 }], {}, {});
   assert.deepStrictEqual(r.add.map(x => x.id), ['a']);
   assert.deepStrictEqual(r.del, []);
   assert.deepStrictEqual(r.pushed, { a: true });
+});
+
+t('diffPushed: hand の付いていない行（毎月の取込など）は送らない', () => {
+  const r = S.diffPushed([{ id: 'k2609x', date: '2026-09-01', amount: 100 }, { id: 'm2610y' }], {}, {});
+  assert.deepStrictEqual(r.add, []);
+  assert.deepStrictEqual(r.pushed, {});
+});
+
+t('diffPushed: hand:1 の行だけを送る（hand が 1 以外の値でも送らない）', () => {
+  const r = S.diffPushed([{ id: 'k1' }, { id: 'h1', hand: 1 }, { id: 'h2', hand: true }, { id: 'h3', hand: '1' }, { id: 'h4', hand: 1 }], {}, {});
+  assert.deepStrictEqual(r.add.map(x => x.id), ['h1', 'h4']);
+});
+
+t('diffPushed: pushed に増えるのは実際に送った id だけ', () => {
+  const r = S.diffPushed([{ id: 'k1' }, { id: 'h1', hand: 1 }, { id: 'cal:3', src: 'cal' }, { id: 'h0', hand: 1 }], {}, { h0: true, old: true });
+  assert.deepStrictEqual(r.add.map(x => x.id), ['h1']);
+  assert.deepStrictEqual(r.pushed, { h0: true, old: true, h1: true });
+});
+
+t('diffPushed: 取込の行に墓標があっても、送っていなければ消しは送らない', () => {
+  const r = S.diffPushed([], { k1: 5, h1: 6 }, { h1: true });
+  assert.deepStrictEqual(r.del, ['h1']);
+  assert.deepStrictEqual(r.pushed, {});
 });
 
 t('tombstonesFor は消えた id だけ', () => {

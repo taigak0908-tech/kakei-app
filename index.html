@@ -415,7 +415,7 @@ function renderDonut(){
     const s='<circle cx="66" cy="66" r="52" fill="none" stroke="'+(g==='要確認'?'url(#hatch)':col(g))+'" stroke-width="15" stroke-dasharray="'+len+' '+(C-len)+'" stroke-dashoffset="'+(-off)+'"></circle>'; off+=len; return s; }).join('');
   $('donutTotal').textContent=yen(m.total);
   $('toplist').innerHTML=m.g.slice(0,5).map(([g,v])=>{ const w=g==='要確認';
-    return '<div class="row"><span class="dot" style="'+(w?'background:repeating-linear-gradient(45deg,#ff5a52 0 2px,transparent 2px 4px);border:1px solid rgba(255,90,82,.5)':'background:'+col(g))+'"></span><span class="nm">'+g+'</span><span class="pc">'+(v/m.total*100).toFixed(0)+'%</span></div>'; }).join('');
+    return '<div class="row"><span class="dot" style="'+(w?'background:repeating-linear-gradient(45deg,#ff5a52 0 2px,transparent 2px 4px);border:1px solid rgba(255,90,82,.5)':'background:'+col(g))+'"></span><span class="nm">'+esc(g)+'</span><span class="pc">'+(v/m.total*100).toFixed(0)+'%</span></div>'; }).join('');
 }
 function sortGenres(gArr, prevMap){
   const mode=prefs.sortMode||'amt_desc'; const arr=gArr.slice();
@@ -457,7 +457,7 @@ function renderCats(){
     }
     return '<div class="cat" data-g="'+encodeURIComponent(g)+'"><div class="line">'
       +'<span class="dot'+(w?' hatch':'')+'" style="'+(w?'':'background:'+col(g))+'"></span>'
-      +'<span class="nm">'+g+(w?'<span class="w">未確定</span>':'')+'<span class="chev">▸ 店舗</span></span>'
+      +'<span class="nm">'+esc(g)+(w?'<span class="w">未確定</span>':'')+'<span class="chev">▸ 店舗</span></span>'
       +'<span class="amt tnum">¥'+yen(v)+'</span>'+right+'</div>'
       +'<div class="bar"><i style="width:'+(v/max*100)+'%;background:'+(w?'repeating-linear-gradient(45deg,#ff5a52 0 3px,transparent 3px 6px)':col(g))+'"></i></div>'
       + cmp
@@ -470,7 +470,7 @@ function aggYearStores(y,g){
 }
 function shopRows(shops, c){
   const mx=shops[0][1];
-  return shops.map(([s,a,cn])=>'<div class="shoprow"><span class="sn">'+s+(cn>1?' <span style="color:var(--faint)">×'+cn+'</span>':'')+'</span><span class="sbar"><i style="width:'+(a/mx*100)+'%;background:'+c+'"></i></span><span class="sa">¥'+yen(a)+'</span></div>').join('');
+  return shops.map(([s,a,cn])=>'<div class="shoprow"><span class="sn">'+esc(s)+(cn>1?' <span style="color:var(--faint)">×'+cn+'</span>':'')+'</span><span class="sbar"><i style="width:'+(a/mx*100)+'%;background:'+c+'"></i></span><span class="sa">¥'+yen(a)+'</span></div>').join('');
 }
 function toggleCat(el){
   const open=el.classList.contains('open');
@@ -482,7 +482,7 @@ function toggleCat(el){
   if(m.year){ shops=aggYearStores(m.y,g); hl=g+'・店舗別（'+m.y+'年 合計）'; }
   else { shops=(SHOP[m.ym]||{})[g]||[]; hl=g+'・店舗別（'+m.y+'年'+m.m+'月）'; }
   let html;
-  if(shops.length){ html='<div class="hl">'+hl+'</div>'+shopRows(shops, c); }
+  if(shops.length){ html='<div class="hl">'+esc(hl)+'</div>'+shopRows(shops, c); }
   else html='<div class="nodata">この期間の店舗内訳はありません。</div>';
   el.querySelector('.drill').innerHTML=html; el.classList.add('open');
 }
@@ -504,7 +504,7 @@ function renderTx(){
   if(!list.length){ $('txlist').innerHTML='<div class="nodata">この期間の手入力明細はありません。右下の「＋」から記録できます。</div>'; return; }
   // くらしカレンダー由来の行（src:'cal'）は誰の分かを出し、ここでは消せない（カレンダーで消す）
   $('txlist').innerHTML=list.map(t=>{ const cal=t.src==='cal';
-    return '<div class="txrow"><span class="td">'+t.date.slice(5).replace('-','/')+'</span>'
+    return '<div class="txrow"><span class="td">'+esc(t.date.slice(5).replace('-','/'))+'</span>'
     +'<span class="dot" style="background:'+col(t.genre)+'"></span>'
     +'<span class="tn">'+esc(t.shop||t.genre)+(cal?'<span class="tg">〔'+esc(t.who||'')+'〕</span>':'')+'<span class="tg">'+esc(t.genre)+'</span></span>'
     +'<span class="ta tnum">¥'+yen(t.amount)+'</span>'
@@ -545,14 +545,17 @@ $('fSave').onclick=()=>{
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ alert('日付を入力してください'); return; }
   if(!(amt>0)){ alert('金額を入力してください'); return; }
   if(!genre){ alert('カテゴリを選択または入力してください'); return; }
-  TX.push({ id:Date.now().toString(36)+Math.random().toString(36).slice(2,7), date, amount:amt, genre, shop, ts:Date.now() });
+  // hand:1 … ここ（＋）で入れた行の印。同期でくらしカレンダーへ送るのはこの行だけ（毎月の取込の行は送らない）
+  TX.push({ id:Date.now().toString(36)+Math.random().toString(36).slice(2,7), date, amount:amt, genre, shop, ts:Date.now(), hand:1 });
   saveTx(); closeSheet(); buildData();
   const i=mIndexByYm(date.slice(0,7)); if(i>=0){ idx=i; ymode=false; }
   render();
 };
 
+// 書き出しはカレンダー由来の行（src:'cal'）も含めた TX まるごと（月次 JSON・月次レポートに世帯の行が要る）。
+// exportedAt：書き出した時刻。読み込むとき、これより後に入れた行を消さないために使う
 $('expBtn').onclick=()=>{
-  const blob=new Blob([JSON.stringify({app:'kakei',ver:2,exported:todayStr(),tx:nonCal(TX),prefs:prefs,add:ADD},null,1)],{type:'application/json'});
+  const blob=new Blob([JSON.stringify({app:'kakei',ver:2,exported:todayStr(),exportedAt:Date.now(),tx:TX,prefs:prefs,add:ADD},null,1)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='kakei-backup-'+todayStr()+'.json';
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
   bkMark();
@@ -565,7 +568,7 @@ $('impFile').onchange=e=>{
     try{
       const d=JSON.parse(r.result);
       if(!Array.isArray(d.tx)) throw new Error('bad format');
-      txReplace(d.tx); if(d.prefs&&typeof d.prefs==='object') prefs=Object.assign(prefs,d.prefs);
+      txReplace(d.tx, +d.exportedAt||0); if(d.prefs&&typeof d.prefs==='object') prefs=Object.assign(prefs,d.prefs);
       if(d.add&&d.add.months) addReplace(d.add);
       saveTx(); savePrefs(); saveAdd(); buildData(); idx=0; ymode=false; render();
       alert('読み込みました（手入力 '+TX.length+'件 / 追加取込 '+addCount()+'ヶ月）');
@@ -575,7 +578,7 @@ $('impFile').onchange=e=>{
 };
 
 $('codeCopy').onclick=async()=>{
-  const code='KAKEI1.'+btoa(unescape(encodeURIComponent(JSON.stringify({tx:nonCal(TX),prefs:prefs,add:ADD}))));
+  const code='KAKEI1.'+btoa(unescape(encodeURIComponent(JSON.stringify({tx:TX,prefs:prefs,add:ADD,exportedAt:Date.now()}))));
   try{ await navigator.clipboard.writeText(code); alert('引き継ぎコードをコピーしました。\nLINEやメールなどで新しい端末に送り、「引き継ぎコードを読み込み」に貼り付けてください。'); }
   catch(e){ prompt('このコードを全選択してコピーしてください', code); }
 };
@@ -585,7 +588,7 @@ $('codePaste').onclick=()=>{
   try{
     const d=JSON.parse(decodeURIComponent(escape(atob(s.trim().replace(/^KAKEI1\./,'')))));
     if(!Array.isArray(d.tx)) throw new Error('bad format');
-    txReplace(d.tx); if(d.prefs&&typeof d.prefs==='object') prefs=Object.assign(prefs,d.prefs);
+    txReplace(d.tx, +d.exportedAt||0); if(d.prefs&&typeof d.prefs==='object') prefs=Object.assign(prefs,d.prefs);
     if(d.add&&d.add.months) addReplace(d.add);
     saveTx(); savePrefs(); saveAdd(); buildData(); idx=0; ymode=false; render();
     alert('読み込みました（手入力 '+TX.length+'件 / 追加取込 '+addCount()+'ヶ月）');
@@ -647,13 +650,17 @@ $('addClr').onclick=()=>{
 };
 // バックアップ・引き継ぎコードで手入力をまるごと置き換える。消えた行には墓標を付け、
 // 新しく入った行・墓標のある行（戻した行）・中身を直した行は ts を今にして、同期で古い状態に戻らないようにする。同じ行は ts をそのまま
-function txReplace(nt){
-  const now=Date.now(), old={};
+// exportedAt（書き出した時刻。古いファイルには無く 0）より後に入れた行は、ファイルに無くても消さずに後ろへ残す（墓標も付けない）
+function txReplace(nt, exportedAt){
+  const now=Date.now(), old={}, inNew={};
   TX.forEach(t=>{ if(t&&t.id!=null) old[t.id]=t; });
-  Object.assign(DEL, KakeiSync.tombstonesFor(TX, nt, now)); saveDel();
+  nt.forEach(t=>{ if(t&&t.id!=null) inNew[t.id]=true; });
+  const newer = exportedAt>0 ? TX.filter(t=>t && !isCal(t) && !inNew[t.id] && typeof t.ts==='number' && t.ts>exportedAt) : [];
+  const next = nt.concat(newer);
+  Object.assign(DEL, KakeiSync.tombstonesFor(TX, next, now)); saveDel();
   nt.forEach(t=>{ if(!t||t.src==='cal') return; const o=old[t.id];
     if(!o || DEL[t.id]!=null || o.date!==t.date || o.amount!==t.amount || o.genre!==t.genre || (o.shop||'')!==(t.shop||'')) t.ts=now; });
-  TX=nt;
+  TX=next;
 }
 // バックアップ・引き継ぎコードで追加分をまるごと置き換える。前後どちらかにある月は今の時刻にして、同期で古い中身に戻らないようにする
 function addReplace(na){
@@ -795,6 +802,8 @@ async function syncPushNow(force){
     const r=await callSync('kakei_put',{blob:{at,data}, rows:{add:d.add, del:d.del}});
     SYNC.pushed=d.pushed; SYNC.lastAt=at; syncRemoteAt=Math.max(syncRemoteAt, at); syncBad=false; saveSync();
     syncTake(null, r.calRows);
+    // 塊が置かれなかった＝別の端末の新しい塊が向こうにある。すぐ取りに行って追いつく（列の後ろに並ぶ）
+    if(r.written===false) syncPull();
   }catch(e){ console.warn('同期：送れませんでした', e); }
   syncShow();
 }
@@ -803,9 +812,33 @@ function syncPush(force){ return syncSerial(()=>syncPushNow(!!force)); }
 function syncSoon(){ if(!SYNC.url||!SYNC.token) return; clearTimeout(syncTimer); syncTimer=setTimeout(()=>{ syncTimer=null; syncPush(); },3000); }
 let syncTick=null;   // 「○分前」を進める。つないだ端末でだけ動かす
 function syncTickStart(){ if(!syncTick && SYNC.url && SYNC.token) syncTick=setInterval(syncShow, 60000); }
+// 初めてつないだ端末で、向こうの塊で手元の手入力・墓標・追加分を置き換える（聞いて OK のときだけ）。
+// 塊が無い・読めないときは何もしない（読めないときは syncConnect の「上書きし直す」に任せる）。キャンセルなら今までどおり混ぜる
+async function syncFirstTake(){
+  try{
+    const g=await callSync('kakei_get',{});
+    if(!(g.blob&&g.blob.data)) return false;
+    const remote=await decryptSync(g.blob.data);
+    if(!remote) return false;
+    syncRemoteAt=Math.max(syncRemoteAt, +g.blob.at||0);
+    if(!confirm('Google にある同期の内容で、この端末の手入力を置き換えますか？\n（キャンセル：この端末の分と混ぜる）')) return false;
+    const R=asState(remote);
+    TX=R.tx.concat(TX.filter(isCal)); DEL=R.del; ADD=R.add;
+    if(!ADD.months||typeof ADD.months!=='object') ADD.months={};
+    if(!ADD.at||typeof ADD.at!=='object') ADD.at={};
+    if(Array.isArray(g.calRows)) TX=KakeiSync.applyCalRows(TX, g.calRows).tx;
+    R.tx.forEach(t=>{ if(t&&t.id!=null) SYNC.pushed[t.id]=true; });   // 塊にある行は送り済み
+    SYNC.lastPull=Date.now(); syncBad=false;
+    saveDel(); saveAdd(); saveTx(); saveSync();
+    clearTimeout(syncTimer); syncTimer=null;   // 向こうと同じ中身なので、保存で予約された送信は要らない
+    buildData(); idx=0; ymode=false; render();
+    return true;
+  }catch(e){ console.warn('同期：初回の取り込みができませんでした', e); return false; }
+}
 async function syncConnect(){
   const url=(prompt('受け口のURL', SYNC.url||'')||'').trim(); if(!url) return;
-  const code=(prompt('6桁コード')||'').trim(); if(!code) return;
+  // 全角の数字（１２３４５６）で打っても通るよう半角にする。空白も除く
+  const code=(prompt('6桁コード')||'').replace(/[０-９]/g, c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/[\s　]/g,''); if(!code) return;
   const ok=await syncSerial(async()=>{
     const prev=SYNC.url;
     try{
@@ -820,6 +853,9 @@ async function syncConnect(){
   });
   if(!ok){ $('syncState').textContent='同期：つなげませんでした（URL とコードを確かめてください）'; return; }
   syncTickStart();
+  // この端末で初めてつないだとき（送った記録が空）で、向こうに読める塊があれば、置き換えるか混ぜるかを聞く。
+  // 2台目の端末は手入力がずれていることが多く、混ぜると消したはずの行が戻ったり二重になったりするため
+  if(!Object.keys(SYNC.pushed||{}).length) await syncSerial(syncFirstTake);
   await syncPull();
   // つなぎ直しても塊が読めない（合言葉が変わった等）ときは、手元の分で上書きし直す。これが「読めません」の直し方
   if(syncBad){ syncBad=false; await syncPush(true); }

@@ -1,7 +1,9 @@
 // カケイ 端末同期の「混ぜ方」。画面にも Google にも触らない純粋関数だけを置く。
 // ブラウザでは window.KakeiSync、node（テスト）では module.exports に出す。
 // 状態の形: { tx: Row[], del: { id: 時刻 }, add: { months: { 'YYYY-MM': 中身 }, at: { 'YYYY-MM': 時刻 } } }
-// Row: { id, date, amount, genre, shop, ts?, src?, who?, calId? }（ts の無い行は ts=0 とみなす）
+// Row: { id, date, amount, genre, shop, ts?, src?, who?, calId?, hand? }（ts の無い行は ts=0 とみなす）
+//   hand:1 … カケイの「＋」で手入力した行。くらしカレンダーへ送るのはこの行だけ
+//            （毎月の取込で入った行や、同期をつなぐ前からある行は送らない）
 
 function _clone(x) { return x === undefined ? x : JSON.parse(JSON.stringify(x)); }
 function _has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
@@ -140,7 +142,7 @@ function applyCalRows(tx, calRows) {
 }
 
 // 前回までに送った id（pushed）と比べて、今回送るものを決める。入力は書き換えない。
-//   add: まだ送っていない行（cal 行は送らない）
+//   add: まだ送っていない、手で入れた行（hand === 1）だけ。cal 行と取込の行（hand の無い行）は送らない
 //   del: 墓標があり、かつ以前送った id（向こうに居るので消してもらう）
 //   pushed: 古い pushed に add の id を足し、del の id を引いたもの
 function diffPushed(tx, del, pushed) {
@@ -152,7 +154,7 @@ function diffPushed(tx, del, pushed) {
   for (k in oldPushed) if (_has(oldPushed, k)) next[k] = oldPushed[k];
   for (i = 0; i < (tx || []).length; i++) {
     var row = tx[i];
-    if (!row || row.src === 'cal') continue;
+    if (!row || row.src === 'cal' || row.hand !== 1) continue;
     if (!_has(oldPushed, row.id)) { add.push(row); next[row.id] = true; }
   }
   for (k in (del || {})) {
