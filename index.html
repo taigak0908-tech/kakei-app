@@ -552,7 +552,7 @@ $('fSave').onclick=()=>{
 };
 
 $('expBtn').onclick=()=>{
-  const blob=new Blob([JSON.stringify({app:'kakei',ver:2,exported:todayStr(),tx:TX,prefs:prefs,add:ADD},null,1)],{type:'application/json'});
+  const blob=new Blob([JSON.stringify({app:'kakei',ver:2,exported:todayStr(),tx:nonCal(TX),prefs:prefs,add:ADD},null,1)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='kakei-backup-'+todayStr()+'.json';
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
   bkMark();
@@ -565,8 +565,7 @@ $('impFile').onchange=e=>{
     try{
       const d=JSON.parse(r.result);
       if(!Array.isArray(d.tx)) throw new Error('bad format');
-      Object.assign(DEL, KakeiSync.tombstonesFor(TX, d.tx, Date.now())); saveDel();
-      TX=d.tx; if(d.prefs&&typeof d.prefs==='object') prefs=Object.assign(prefs,d.prefs);
+      txReplace(d.tx); if(d.prefs&&typeof d.prefs==='object') prefs=Object.assign(prefs,d.prefs);
       if(d.add&&d.add.months) addReplace(d.add);
       saveTx(); savePrefs(); saveAdd(); buildData(); idx=0; ymode=false; render();
       alert('読み込みました（手入力 '+TX.length+'件 / 追加取込 '+addCount()+'ヶ月）');
@@ -576,7 +575,7 @@ $('impFile').onchange=e=>{
 };
 
 $('codeCopy').onclick=async()=>{
-  const code='KAKEI1.'+btoa(unescape(encodeURIComponent(JSON.stringify({tx:TX,prefs:prefs,add:ADD}))));
+  const code='KAKEI1.'+btoa(unescape(encodeURIComponent(JSON.stringify({tx:nonCal(TX),prefs:prefs,add:ADD}))));
   try{ await navigator.clipboard.writeText(code); alert('引き継ぎコードをコピーしました。\nLINEやメールなどで新しい端末に送り、「引き継ぎコードを読み込み」に貼り付けてください。'); }
   catch(e){ prompt('このコードを全選択してコピーしてください', code); }
 };
@@ -586,8 +585,7 @@ $('codePaste').onclick=()=>{
   try{
     const d=JSON.parse(decodeURIComponent(escape(atob(s.trim().replace(/^KAKEI1\./,'')))));
     if(!Array.isArray(d.tx)) throw new Error('bad format');
-    Object.assign(DEL, KakeiSync.tombstonesFor(TX, d.tx, Date.now())); saveDel();
-    TX=d.tx; if(d.prefs&&typeof d.prefs==='object') prefs=Object.assign(prefs,d.prefs);
+    txReplace(d.tx); if(d.prefs&&typeof d.prefs==='object') prefs=Object.assign(prefs,d.prefs);
     if(d.add&&d.add.months) addReplace(d.add);
     saveTx(); savePrefs(); saveAdd(); buildData(); idx=0; ymode=false; render();
     alert('読み込みました（手入力 '+TX.length+'件 / 追加取込 '+addCount()+'ヶ月）');
@@ -647,6 +645,16 @@ $('addClr').onclick=()=>{
   Object.keys(ADD.months||{}).forEach(k=>at[k]=now);   // 消したことも同期で伝わるよう時刻を残す
   ADD={months:{}, at}; saveAdd(); buildData(); idx=0; ymode=false; render();
 };
+// バックアップ・引き継ぎコードで手入力をまるごと置き換える。消えた行には墓標を付け、
+// 新しく入った行・墓標のある行（戻した行）・中身を直した行は ts を今にして、同期で古い状態に戻らないようにする。同じ行は ts をそのまま
+function txReplace(nt){
+  const now=Date.now(), old={};
+  TX.forEach(t=>{ if(t&&t.id!=null) old[t.id]=t; });
+  Object.assign(DEL, KakeiSync.tombstonesFor(TX, nt, now)); saveDel();
+  nt.forEach(t=>{ if(!t||t.src==='cal') return; const o=old[t.id];
+    if(!o || DEL[t.id]!=null || o.date!==t.date || o.amount!==t.amount || o.genre!==t.genre || (o.shop||'')!==(t.shop||'')) t.ts=now; });
+  TX=nt;
+}
 // バックアップ・引き継ぎコードで追加分をまるごと置き換える。前後どちらかにある月は今の時刻にして、同期で古い中身に戻らないようにする
 function addReplace(na){
   const now=Date.now(), nm=na.months||{}, at=Object.assign({}, ADD.at||{}, (na.at&&typeof na.at==='object')?na.at:{});
@@ -713,10 +721,13 @@ async function decryptSync(s){
 }
 async function callSync(action, body){
   const p=Object.assign({action}, action==='kakei_pair'?{}:{token:SYNC.token}, body||{});   // つなぐときは合言葉を送らない
-  const res=await fetch(SYNC.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(p)});
-  const j=await res.json();
-  if(!j||!j.ok) throw new Error((j&&j.error)||'受け口がエラーを返しました');
-  return j;
+  const ac=new AbortController(), to=setTimeout(()=>ac.abort(),20000);   // 返事が来ないまま列を止めないよう20秒で打ち切る
+  try{
+    const res=await fetch(SYNC.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(p),signal:ac.signal});
+    const j=await res.json();
+    if(!j||!j.ok) throw new Error((j&&j.error)||'受け口がエラーを返しました');
+    return j;
+  }finally{ clearTimeout(to); }
 }
 const syncReady=()=>!!(SYNC.url&&SYNC.token&&KEY&&SEED);
 function syncShow(){
@@ -753,26 +764,33 @@ async function syncPullNow(){
     } else syncBad=false;
     syncTake(remote, r.calRows);
     SYNC.lastPull=Date.now(); saveSync();
-    // 手元にしか無いもの（送り損ねた分）があれば送る。読めない塊は勝手に上書きしない
+    // 手元にしか無いもの（送り損ねた分）があれば送る。
+    // 塊が読めない（syncBad）ときは送らない＝上書きもしない。上書きするのは「同期をつなぐ」をやり直した直後だけ（syncConnect）
     if(!syncBad){ const R=remote?asState(remote):asState(null);
       if(KakeiSync.mergeState(R, asState({tx:TX,del:DEL,add:ADD})).changed) syncSoon(); }
   }catch(e){ console.warn('同期：取れませんでした', e); }
   syncShow();
 }
-async function syncPushNow(){
+// force: つなぎ直した直後だけ true。読めない塊を手元の分で上書きする
+async function syncPushNow(force){
   if(!syncReady()) return syncShow();
+  if(syncBad && !force) return syncShow();   // 読めない塊は上書きしない（空の塊も送らない）
   try{
-    if(!nonCal(TX).length){
+    if(!force && !nonCal(TX).length){
       // 手元が空のときは、向こうにある行を空で上書きしないよう先に取って混ぜる（全部消した結果の空なら送る）
       const g=await callSync('kakei_get',{});
       const remote=(g.blob&&g.blob.data)?await decryptSync(g.blob.data):null;
       if(g.blob) syncRemoteAt=Math.max(syncRemoteAt, +g.blob.at||0);
+      if(g.blob&&g.blob.data&&!remote){ syncBad=true; return syncShow(); }
       if(remote && !KakeiSync.shouldPush(nonCal(TX), nonCal(remote.tx))
          && nonCal(KakeiSync.mergeState(asState({tx:TX,del:DEL,add:ADD}), asState(remote)).tx).length){
         syncBad=false; syncTake(remote, g.calRows); SYNC.lastPull=Date.now(); saveSync(); return syncShow();
       }
     }
-    const tx=nonCal(TX), d=KakeiSync.diffPushed(tx, DEL, SYNC.pushed), at=Math.max(Date.now(), syncRemoteAt+1);
+    // 墓標より新しい行が手元にある id（読み込みで戻した行など）は、カレンダーへ「消す」を送らない
+    const tx=nonCal(TX), live={}; tx.forEach(t=>live[t.id]=true);
+    const delLive={}; for(const k in DEL) if(!live[k]) delLive[k]=DEL[k];
+    const d=KakeiSync.diffPushed(tx, delLive, SYNC.pushed), at=Math.max(Date.now(), syncRemoteAt+1);
     const data=await encryptSync({ver:1, at, tx, del:DEL, add:ADD});
     const r=await callSync('kakei_put',{blob:{at,data}, rows:{add:d.add, del:d.del}});
     SYNC.pushed=d.pushed; SYNC.lastAt=at; syncRemoteAt=Math.max(syncRemoteAt, at); syncBad=false; saveSync();
@@ -781,8 +799,10 @@ async function syncPushNow(){
   syncShow();
 }
 function syncPull(){ return syncSerial(syncPullNow); }
-function syncPush(){ return syncSerial(syncPushNow); }
+function syncPush(force){ return syncSerial(()=>syncPushNow(!!force)); }
 function syncSoon(){ if(!SYNC.url||!SYNC.token) return; clearTimeout(syncTimer); syncTimer=setTimeout(()=>{ syncTimer=null; syncPush(); },3000); }
+let syncTick=null;   // 「○分前」を進める。つないだ端末でだけ動かす
+function syncTickStart(){ if(!syncTick && SYNC.url && SYNC.token) syncTick=setInterval(syncShow, 60000); }
 async function syncConnect(){
   const url=(prompt('受け口のURL', SYNC.url||'')||'').trim(); if(!url) return;
   const code=(prompt('6桁コード')||'').trim(); if(!code) return;
@@ -793,11 +813,16 @@ async function syncConnect(){
       SYNC.url=url;
       const r=await callSync('kakei_pair',{code});
       if(!r.token) throw new Error('合言葉が返ってきませんでした');
+      // 別の受け口に変えたときは、送った記録をいったん捨てる（向こうには何も無い）
+      if(url!==prev){ SYNC.pushed={}; SYNC.lastAt=0; syncRemoteAt=0; }
       SYNC.token=r.token; syncBad=false; saveSync(); return true;
     }catch(e){ SYNC.url=prev; console.warn('同期：つなげませんでした', e); return false; }
   });
   if(!ok){ $('syncState').textContent='同期：つなげませんでした（URL とコードを確かめてください）'; return; }
+  syncTickStart();
   await syncPull();
+  // つなぎ直しても塊が読めない（合言葉が変わった等）ときは、手元の分で上書きし直す。これが「読めません」の直し方
+  if(syncBad){ syncBad=false; await syncPush(true); }
 }
 $('syncBtn').onclick=()=>syncConnect();
 document.addEventListener('visibilitychange',()=>{
@@ -805,7 +830,6 @@ document.addEventListener('visibilitychange',()=>{
   else if(syncTimer){ clearTimeout(syncTimer); syncTimer=null; syncPush(); }   // 閉じる前に待ちの分を送る
 });
 addEventListener('online',()=>syncPull());
-setInterval(syncShow, 60000);
 
 function startApp(){
   COLORS=SEED.colors;
@@ -815,7 +839,7 @@ function startApp(){
   render();
   $('lock').style.display='none';
   bkShow();
-  syncShow(); syncPull();
+  syncShow(); syncTickStart(); syncPull();
 }
 function showLock(){
   $('lock').style.display='flex';
