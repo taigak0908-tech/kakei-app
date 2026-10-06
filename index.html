@@ -728,7 +728,9 @@ async function decryptSync(s){
 }
 async function callSync(action, body){
   const p=Object.assign({action}, action==='kakei_pair'?{}:{token:SYNC.token}, body||{});   // つなぐときは合言葉を送らない
-  const ac=new AbortController(), to=setTimeout(()=>ac.abort(),20000);   // 返事が来ないまま列を止めないよう20秒で打ち切る
+  // 返事が来ないまま列を止めないよう打ち切る。Apps Script はしばらく使っていないと最初の返事に10秒以上かかり、
+  // 携帯回線ではさらに延びる（2026-10-06 実機で20秒の打ち切りに何度も当たった）ので60秒にする
+  const ac=new AbortController(), to=setTimeout(()=>ac.abort(),60000);
   try{
     const res=await fetch(SYNC.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(p),signal:ac.signal});
     const j=await res.json();
