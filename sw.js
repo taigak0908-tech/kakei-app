@@ -1,4 +1,4 @@
-const CACHE = 'kakei-v3';
+const CACHE = 'kakei-v4';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './sync.js'];
 
 self.addEventListener('install', e => {
@@ -7,7 +7,8 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      // 同じ github.io には他のアプリも同居しているので、自分の古いキャッシュ（kakei-）だけ消す
+      .then(ks => Promise.all(ks.filter(k => k.startsWith('kakei-') && k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
