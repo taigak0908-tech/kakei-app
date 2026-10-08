@@ -1,4 +1,4 @@
-const CACHE = 'kakei-v5';
+const CACHE = 'kakei-v6';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './sync.js', './app.js'];
 
 self.addEventListener('install', e => {

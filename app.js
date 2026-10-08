@@ -34,11 +34,12 @@ function cleanTxRow(t){
   o.date = date; o.amount = num0(t.amount); o.genre = strN(t.genre, 60);
   if(t.shop != null) o.shop = strN(t.shop, 120);
   if(t.who != null) o.who = strN(t.who, 60);
-  o.id = (typeof t.id === 'number' && isFinite(t.id)) ? t.id : strN(t.id, 80);
+  o.id = (typeof t.id === 'number' && isFinite(t.id)) ? t.id : strN(t.id, 200);
   if(t.ts != null) o.ts = num0(t.ts);
   return o;
 }
 const cleanTx = a => (Array.isArray(a) ? a : []).map(cleanTxRow).filter(Boolean);
+const cleanCalRows = cleanTx;   // カレンダーから来た行も、入れ替える前に同じ形へ
 function cleanAdd(a){
   const out = { months: {}, at: {} };
   if(!a || typeof a !== 'object') return out;
@@ -61,6 +62,8 @@ function cleanPrefs(p){
   if(p && typeof p === 'object'){
     const b = Number(p.budget); if(isFinite(b) && b > 0) out.budget = Math.round(b);
     if(typeof p.lastYm === 'string' && okYm(p.lastYm)) out.lastYm = p.lastYm;
+    if(['amt_desc','amt_asc','name','chg'].includes(p.sortMode)) out.sortMode = p.sortMode;
+    if(p.ymode === true) out.ymode = true;
   }
   return out;
 }
@@ -348,11 +351,13 @@ $('expBtn').onclick=()=>{
 $('impBtn').onclick=()=>$('impFile').click();
 $('impFile').onchange=e=>{
   const f=e.target.files[0]; if(!f) return;
+  if(f.size>20*1024*1024){ alert('ファイルが大きすぎます'); e.target.value=''; return; }
   const r=new FileReader();
   r.onload=()=>{
     try{
       const d=JSON.parse(r.result);
       if(!Array.isArray(d.tx)) throw new Error('bad format');
+      if(!confirm('バックアップの手入力 '+d.tx.length+'件で、今の手入力（'+TX.length+'件）を置き換えます。ほかの端末にも反映されます。よろしいですか？')) return;
       txReplace(cleanTx(d.tx), +d.exportedAt||0); if(d.prefs&&typeof d.prefs==='object') prefs=cleanPrefs(d.prefs);
       if(d.add&&d.add.months) addReplace(cleanAdd(d.add));
       saveTx(); savePrefs(); saveAdd(); buildData(); idx=0; ymode=false; render();
@@ -373,6 +378,7 @@ $('codePaste').onclick=()=>{
   try{
     const d=JSON.parse(decodeURIComponent(escape(atob(s.trim().replace(/^KAKEI1\./,'')))));
     if(!Array.isArray(d.tx)) throw new Error('bad format');
+    if(!confirm('引き継ぎコードの手入力 '+d.tx.length+'件で、今の手入力（'+TX.length+'件）を置き換えます。ほかの端末にも反映されます。よろしいですか？')) return;
     txReplace(cleanTx(d.tx), +d.exportedAt||0); if(d.prefs&&typeof d.prefs==='object') prefs=cleanPrefs(d.prefs);
     if(d.add&&d.add.months) addReplace(cleanAdd(d.add));
     saveTx(); savePrefs(); saveAdd(); buildData(); idx=0; ymode=false; render();
@@ -493,7 +499,7 @@ async function tryCachedKey(){
   // 以前の版は生の鍵を localStorage に置いていた。あれば取り出せない形に移して、localStorage からは消す
   const k=localStorage.getItem(KEY_CACHE); if(!k) return false;
   try{ const key=await crypto.subtle.importKey('raw',b64d(k),'AES-GCM',false,['encrypt','decrypt']); SEED=await decryptSeed(key); KEY=key;
-       await keyStore('put', key); localStorage.removeItem(KEY_CACHE); return true; }
+       if(await keyStore('put', key)) localStorage.removeItem(KEY_CACHE); return true; }
   catch(e){ localStorage.removeItem(KEY_CACHE); return false; }
 }
 
@@ -559,7 +565,7 @@ function syncTake(remote, calRows){
     const m=KakeiSync.mergeState(asState({tx:TX,del:DEL,add:ADD}), asState(remote));
     if(m.changed){ TX=cleanTx(m.tx).concat(TX.filter(isCal)); DEL=m.del; ADD=cleanAdd(m.add); ch=true; }
   }
-  if(Array.isArray(calRows)){ const c=KakeiSync.applyCalRows(TX, calRows); if(c.changed){ TX=cleanTx(c.tx); ch=true; } }
+  if(Array.isArray(calRows)){ const c=KakeiSync.applyCalRows(TX, cleanCalRows(calRows)); if(c.changed){ TX=cleanTx(c.tx); ch=true; } }
   saveSync();
   if(ch){ saveDel(); saveAdd(); saveTx(); syncRedraw(); }
 }
@@ -630,7 +636,7 @@ async function syncFirstTake(){
     TX=cleanTx(R.tx).concat(TX.filter(isCal)); DEL=R.del; ADD=cleanAdd(R.add);
     if(!ADD.months||typeof ADD.months!=='object') ADD.months={};
     if(!ADD.at||typeof ADD.at!=='object') ADD.at={};
-    if(Array.isArray(g.calRows)) TX=cleanTx(KakeiSync.applyCalRows(TX, g.calRows).tx);
+    if(Array.isArray(g.calRows)) TX=cleanTx(KakeiSync.applyCalRows(TX, cleanCalRows(g.calRows)).tx);
     R.tx.forEach(t=>{ if(t&&t.id!=null) SYNC.pushed[t.id]=true; });   // 塊にある行は送り済み
     SYNC.lastPull=Date.now(); syncBad=false;
     saveDel(); saveAdd(); saveTx(); saveSync();
