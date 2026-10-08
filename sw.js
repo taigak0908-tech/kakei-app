@@ -1,5 +1,5 @@
-const CACHE = 'kakei-v4';
-const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './sync.js'];
+const CACHE = 'kakei-v5';
+const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './sync.js', './app.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -17,8 +17,11 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   e.respondWith(
     fetch(e.request).then(r => {
-      const cp = r.clone();
-      caches.open(CACHE).then(c => c.put(e.request, cp));
+      // うまく取れた自分のファイルだけ控える（エラーの画面や外の応答をキャッシュしない）
+      if (r.ok && new URL(e.request.url).origin === location.origin) {
+        const cp = r.clone();
+        caches.open(CACHE).then(c => c.put(e.request, cp));
+      }
       return r;
     }).catch(() =>
       caches.match(e.request, { ignoreSearch: true }).then(m => m || caches.match('./index.html'))
